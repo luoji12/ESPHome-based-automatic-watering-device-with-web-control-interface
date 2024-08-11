@@ -1,0 +1,222 @@
+esphome:
+  name: automatic-irrigation
+  friendly_name: Automatic irrigation device
+  name_add_mac_suffix: true
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+api:
+  encryption:
+    key: "SGxQaY+f6BCPh4RaFRZCZRa+3vx1oitOaLosBO1KWS8="
+    # string: The pre-shared key for the encryption. This is a 32-byte base64 encoded string. Below you can copy a key randomly generated in your browser: https://stackoverflow.com/a/62362724[[[See also: Native API Component
+
+ota:
+  - platform: esphome
+    password: "6c1cb49f30418acc098efe1564c6dded"
+    # string: The password to use for updates.See also: OTA Update Component
+improv_serial:
+
+logger:
+  
+web_server:
+  port: 80
+  auth: 
+    username: !secret wifi_ssid
+    password: !secret wifi_password
+  version: 3
+  ota: false 
+  # Whether to enable OTA on the web, it is not recommended to enable it because of security risks
+  log: false 
+  # Whether or not the logs are displayed on the web
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Automatic-Irrigation-Device"
+    password: "3gIRg4eeIO38"
+  manual_ip:
+    static_ip: 192.168.1.55  # Set a static IP address
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+    dns1: 119.29.29.29
+    dns2: 80.80.80.80
+network:
+    enable_ipv6: true
+    min_ipv6_addr_count: 2
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: ESP IP Address
+      address_1:
+        name: ESP IP Address 1
+      address_2:
+        name: ESP IP Address 2
+    mac_address:
+      name: ESP Mac Wifi Address
+    dns_address:
+      name: ESP DNS Address
+      web_server_sorting_weight: 80
+
+
+captive_portal:
+
+globals:
+  - id: pump_active
+    type: bool
+    restore_value: no
+    initial_value: 'false'  
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Asia/Shanghai
+    servers:
+     - 0.pool.ntp.org
+     - 1.pool.ntp.org
+     - 2.pool.ntp.org
+     
+number:
+  - platform: template
+    name: "Moisture Threshold"
+    id: moisture_threshold
+    mode: AUTO
+    web_server_sorting_weight: 70
+    # Sort the components on the web interface, the higher the value, the lower the number, the default is 50
+    unit_of_measurement: "%"
+    min_value: 0.0
+    max_value: 100.0
+    step: 1.0
+    initial_value: 30.0
+    # Default value
+    optimistic: true
+    set_action:
+      - logger.log:
+          format: "Moisture threshold set to %.1f%%"
+          args: ['x']
+
+  - platform: template
+    name: "Pump Duration"
+    id: pump_duration
+    mode: AUTO
+    web_server_sorting_weight: 80
+    unit_of_measurement: "s"
+    min_value: 0
+    max_value: 300
+    step: 1.0
+    initial_value: 20
+    # Default value
+    optimistic: true
+    set_action:
+      - logger.log:
+          format: "Pump duration set to %d seconds"
+          args: ['x']
+
+binary_sensor:
+  - platform: template
+    name: "Pump1 State"
+    id: pump1_state
+    web_server_sorting_weight: 60
+    icon: "mdi:sprout"
+    lambda: |-
+      return id(pump_active);
+
+sensor:
+  - platform: adc
+    pin: 34
+    name: "Soil moisture 1"
+    attenuation: auto
+    id: soil1
+    unit_of_measurement: "%"
+    icon: "mdi:water-percent"
+    web_server_sorting_weight: 30
+    filters:
+      - calibrate_linear:
+         method: least_squares
+         datapoints:
+          - 2.50 -> 0.0
+          - 0.99 -> 100.0
+    # Map 0.0 (from sensor) to 1.0 (true value)，You will need to calibrate the hygrometer yourself
+    update_interval: 1s
+    # Measurement intervals
+
+  - platform: adc
+    pin: 35
+    name: "Soil moisture 2"
+    id: soil2
+    attenuation: auto
+    unit_of_measurement: "%"
+    icon: "mdi:water-percent"
+    web_server_sorting_weight: 40
+    filters:
+      - calibrate_linear:
+         method: least_squares
+         datapoints:
+          - 2.50 -> 0.0
+          - 0.99 -> 100.0
+    # Map 0.0 (from sensor) to 1.0 (true value)，You will need to calibrate the hygrometer yourself
+    update_interval: 1s
+    # Measurement intervals
+  
+  - platform: template
+    name: "Average Soil Moisture All"
+    id: soil_all
+    unit_of_measurement: "%"
+    icon: "mdi:water-percent"
+    web_server_sorting_weight: 20
+    accuracy_decimals: 1
+    update_interval: 10s
+    # Measurement intervals
+    lambda: |-
+      float soil1_value = id(soil1).state;
+      float soil2_value = id(soil2).state;
+      return (soil1_value + soil2_value) / 2.0;
+
+
+    on_value_range:
+      below: !lambda return id(moisture_threshold).state;
+      then:
+        - script.execute: start_pump
+        
+ 
+output:
+  - platform: gpio
+    pin: GPIO27
+    id: output1
+    inverted: False
+    #icon: "mdi:water-pump"
+
+button:
+  - platform: template
+    name: "Pump Control"
+    id: my_button
+    icon: "mdi:water-pump"
+    web_server_sorting_weight: 50
+    on_press:
+      then:
+        - script.execute: start_pump
+  
+  - platform: safe_mode
+    name: Safe Mode Boot
+    internal: true
+    entity_category: diagnostic
+
+script:
+  - id: start_pump
+    mode: queued
+    then:
+      - logger.log: "Pump started"
+      - output.turn_on: output1
+      - lambda: |-
+            id(pump_active) = true;
+      - delay: !lambda 'return (int)id(pump_duration).state * 1000;'
+      - output.turn_off: output1
+      - lambda: |-
+            id(pump_active) = false;
+      - logger.log: "Pump stopped"
