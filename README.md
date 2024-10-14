@@ -20,7 +20,7 @@ Web Control: Once configured, access the web control interface via the device’
 Usage Instructions
 Install ESPHome.
 Clone this repository:
-git clone https://github.com/luoji13/ESPHome-based-automatic-watering-device-with-web-control-interface
+git clone https://github.com/luoji12/ESPHome-based-automatic-watering-device-with-web-control-interface
 Edit the YAML configuration file as needed and upload it to your device:
 esphome run your_config.yaml
 Access the web control interface by entering the device’s IP address in a browser.
